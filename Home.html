@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Expense Tracker</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+      body {
+        background: #2980B9;  /* fallback for old browsers */
+        background: -webkit-linear-gradient(to right, #FFFFFF, #6DD5FA, #2980B9);  /* Chrome 10-25, Safari 5.1-6 */
+        background: linear-gradient(to right, #FFFFFF, #6DD5FA, #2980B9); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      }
+      .container {
+        text-align: center;
+        padding-top: 50px;
+      }
+      h1 {
+        font-family: 'Optima', sans-serif;
+        color: black;
+        font-size: 48px;
+      }
+      h2 {
+        color: #0052A3;
+        font-size: 32px;
+        margin-top: 30px;
+      }
+      .logout-btn {
+        background-color: #0069D9;
+        color: #fff;
+        font-size: 18px;
+        padding: 10px;
+        border-radius: 5px;
+        border: none;
+        cursor: pointer;
+        margin-top: 30px;
+      }
+      .logout-btn:hover {
+        background-color: #0052A3;
+      }
+      /* New button styles */
+      .large-btn {
+        width: 100%;
+        padding: 100px 0;
+        font-size: 32px;
+        margin-bottom: 20px;
+        text-align: center;
+        border: none;
+        cursor: pointer;
+        color: white;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+      }
+      .form-page-btn {
+        background-image: url(https://geekflare.com/wp-content/uploads/2022/02/Best-Expense-TrackingManagement-Software-for-Small-and-Medium-Business-Owners.png);
+      }
+      .summary-page-btn {
+        background-image: url(https://replicate.delivery/pbxt/hQEZFHGuf93YJajmd27uN6FV2Hp2FJGFR8KQXSF0qJsMH3VIA/out..webp);
+      }
+      .report-creation-btn {
+        background-image: url('https://www.searchenginejournal.com/wp-content/uploads/2020/01/marketing-reports-5e0f54085b56c.png');
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Welcome to Your Expense Tracker</h1>
+      <h2>Start Tracking Your Expenses</h2>
+      <button class="large-btn form-page-btn" onclick="location.href='/form-page'">Form Page</button>
+      <button class="large-btn summary-page-btn" onclick="location.href='/summary-page'">Summary Page</button>
+      <button class="large-btn report-creation-btn" onclick="location.href='{{ url_for('report_creation') }}'">Report Creation</button>
+      <button class="logout-btn" onclick="location.href='/'">Logout</button>
+    </div>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  </body>
+</html>
