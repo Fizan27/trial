@@ -17,10 +17,11 @@ from email.mime.multipart import MIMEMultipart # for creating multipart emails
 from email.mime.text import MIMEText # for attaching text in emails
 import os # for performing various operating system related tasks
 from email.mime.image import MIMEImage # for attaching images in emails
+from flask import Flask, render_template, request, jsonify
+import requests
+import bcrypt
 import queue # for implementing queue data structure
-from queue import Queue # for implementing queue data structure
 import logging # For documentation
-from database_handler import DatabaseHandler
 import warnings #to ignore matpotlib warning
 warnings.filterwarnings("ignore")
 
@@ -38,12 +39,78 @@ app.config.update(
 mail = Mail(app)
 report_queue = queue.Queue()
 
+class Node: # Defines a Node class for creating nodes in a tree
+    def __init__(self, data):
+        self.data = data
+        self.next = None
+
+
+class TreeNode: # Defines a TreeNode class which creates a tree structure of expense categories
+    def __init__(self, value, children=None):
+        self.value = value
+        self.children = children if children is not None else []
+
+    def insert_child(self, child_value): # Function to insert a child node to a tree node
+        child = TreeNode(child_value)
+        self.children.append(child)
+        return child
+
+    def delete_child(self, child_value): # Function to delete a child node from a tree node
+        for i, child in enumerate(self.children):
+            if child.value == child_value:
+                del self.children[i]
+                return True
+        return False
+
+    def search_child(self, child_value): # Function to search for a child node in a tree node
+        for child in self.children:
+            if child.value == child_value:
+                return child
+        return None
+
+
+def create_expense_tree(): # Function to create and return a tree data structure with predefined categories and subcategories
+    expense_tree = TreeNode("Expenses")
+    housing = expense_tree.insert_child("Housing")
+    housing.insert_child("Rent")
+    housing.insert_child("Utilities")
+
+    food = expense_tree.insert_child("Food")
+    food.insert_child("Groceries")
+    food.insert_child("Dining Out")
+
+    transportation = expense_tree.insert_child("Transportation")
+    transportation.insert_child("Gas")
+
+    entertainment = expense_tree.insert_child("Entertainment")
+    entertainment.insert_child("TV Streaming")
+    entertainment.insert_child("Vacation")
+
+    miscellaneous = expense_tree.insert_child("Miscellaneous")
+    miscellaneous.insert_child("Clothing, Shoes & Accessories")
+    miscellaneous.insert_child("Pets")
+    miscellaneous.insert_child("Other Needs")
+
+    return expense_tree
+
+
+def dfs_traversal_html(node): # Defines a function to perform depth-first search traversal of the expense tree and return HTML string
+    html = "<ul>"
+    html += f"<li>{node.value}"
+    for child in node.children:
+        html += dfs_traversal_html(child) #recursion
+    html += "</li></ul>"
+    return html
+
+# Create the expense tree and get its HTML string
+expense_tree = create_expense_tree()
+expense_categories_html = dfs_traversal_html(expense_tree)
+
 class ExpenseTracker:
     def __init__(self):
         pass
 
-    def create_summary_graph(email, data,
-                             labels):  # This function creates a bar graph of income and expenses for each month for the given user email
+    def create_summary_graph(email, data, labels):  # This function creates a bar graph of income and expenses for each month for the given user email
         with sqlite3.connect(
                 "user.sqlite") as conn:  # Connects to the user database and retrieve the user ID based on the email
             cur = conn.cursor()
@@ -124,9 +191,7 @@ class ExpenseTracker:
         recommendation = ""
 
         # Calculate the budget percentages
-        needs_percentage, wants_percentage, savings_percentage = calculate_budget_percentages(total_income,
-                                                                                              total_expenses,
-                                                                                              expenses_by_category)
+        needs_percentage, wants_percentage, savings_percentage = ExpenseTracker.calculate_budget_percentages(total_income, total_expenses,expenses_by_category)
 
         # Provide recommendations based on the financial principles
         if needs_percentage < 50:
@@ -267,12 +332,12 @@ class ExpenseTracker:
             # Create and save the summary graph
             summary_data = data[1:-1]
             summary_labels = columns[1:-1]
-            summary_graph_bytes = create_summary_graph(email, summary_data, summary_labels)
+            summary_graph_bytes = ExpenseTracker.create_summary_graph(email, summary_data, summary_labels)
             with open("summary_graph.png", "wb") as f:
                 f.write(summary_graph_bytes.getvalue())
 
             # Create and save the pie chart
-            pie_chart_bytes = create_expense_pie_chart(email, month)
+            pie_chart_bytes = ExpenseTracker.create_expense_pie_chart(email, month)
             if not pie_chart_bytes:
                 report_queue.put((email, False))
                 return
@@ -314,13 +379,6 @@ class ExpenseTracker:
             print(e)
             report_queue.put((email, False))
 
-    def get_user_name(email):  # This function takes an email address as input and returns the corresponding user's name
-        with DatabaseHandler("user.sqlite") as db:
-            db.execute("SELECT name FROM users WHERE email = ?", (email,))
-            user_name = db.fetchone()[0]
-        return user_name  # It returns the user's name as a string.
-
-import sqlite3
 
 class DatabaseHandler:
     def __init__(self, db_name):
@@ -386,6 +444,9 @@ class DatabaseHandler:
                      "FROM expenses WHERE user_id = ? AND month = ?")
         min_expense_row = self.execute_query(query_min, (user_id, month))[0]
 
+        max_expense_row = [0 if value is None else value for value in max_expense_row]
+        min_expense_row = [0 if value is None else value for value in min_expense_row]
+
         return max_expense_row, min_expense_row
 
     def add_expense(self, user_id, expense_data):
@@ -413,15 +474,19 @@ class ExpenseApp(ExpenseTracker):
                 # Create users table if not exists
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, password TEXT)")
-                cur.execute("SELECT * FROM users WHERE email = ? AND password = ?", (email, password))
-                user = cur.fetchone()
+                cur.execute("SELECT password FROM users WHERE email = ?", (email,))
+                result = cur.fetchone()
 
-            if user:
-                # Sets the email in the session and redirect to home page
-                session["email"] = email
-                return redirect(url_for("home"))
+            if result:
+                hashed_password = result[0]
+                if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                    # Sets the email in the session and redirect to home page
+                    session["email"] = email
+                    return redirect(url_for("home"))
+                else:
+                    # Displays an error message for invalid email or password
+                    error = "Invalid email or password"
             else:
-                # Displays an error message for invalid email or password
                 error = "Invalid email or password"
 
             # Render the login template with the error message
@@ -429,8 +494,7 @@ class ExpenseApp(ExpenseTracker):
         else:
             return render_template("login.html")  # Render the login template for GET requests
 
-    @app.route("/Register",
-               methods=["GET", "POST"])  # Specifies url for registration page and allow GET and POST methods
+    @app.route("/Register",methods=["GET", "POST"])  # Specifies url for registration page and allow GET and POST methods
     def register():
         error = None  # initializes the error variable as None, which is used to store error messages if there are any.
         if request.method == "POST":  # checks if the form has been submitted via POST method.
@@ -447,6 +511,9 @@ class ExpenseApp(ExpenseTracker):
                 error = "Passwords do not match. Please try again."
                 return render_template("Register.html", error=error)
 
+            # Hash the password using bcrypt
+            hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+
             # Insert the user data into the database
             with sqlite3.connect(
                     "user.sqlite") as conn:  # connects to the database and sets up a cursor to execute SQL queries.
@@ -460,8 +527,8 @@ class ExpenseApp(ExpenseTracker):
                     password TEXT
                 )
                 """)
-                cur.execute("INSERT INTO users (name, email, password) VALUES (?, ?, ?)", (
-                name, email, password))  # Inserts the new user's data into the users table in the database.
+                cur.execute("INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+                            (name, email, hashed_password.decode('utf-8')))  # Inserts the new user's data including the hashed password into the users table in the database.
                 conn.commit()  # commits the changes made to the database.
 
             flash("You have successfully registered.")  # flashes a success message to be displayed on the next page.
@@ -470,58 +537,77 @@ class ExpenseApp(ExpenseTracker):
             return render_template("Register.html",
                                    error=error)  # handles the GET request by rendering the register template with the error message if there is one
 
-    @app.route("/form-page", methods=["GET", "POST"])
+    @app.route("/form-page", methods=["GET", "POST"])  # Specifies url for form page and allow GET and POST methods
     def form_page():
-        email = session.get("email")
-        form_data = session.get("form_data", {})
-
-        with DatabaseHandler("user.sqlite") as db:
-            user_name = db.execute("SELECT name FROM users WHERE email = ?", (email,)).fetchone()[0]
-
-        if request.method == "POST":
-            form_data.update(request.form)
-            session["form_data"] = form_data
-
+        def get_user_name(
+                email):  # This function takes an email address as input and returns the corresponding user's name
             with DatabaseHandler("user.sqlite") as db:
-                user_id = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()[0]
+                db.execute("SELECT name FROM users WHERE email = ?", (email,))
+                user_name = db.fetchone()[0]
+            return user_name  # It returns the user's name as a string.
+
+        email = session.get("email")  # Get the user's email from the session
+        form_data = session.get("form_data",
+                                {})  # Get the user's form data from the session, or creates an empty dictionary
+
+        user_name = get_user_name(email)  # Get the user's name using the email
+
+        if request.method == "POST":  # Handle POST requests
+            form_data.update(request.form)  # Update the form_data with the data from the submitted form
+            session["form_data"] = form_data  # Saves the form_data to the session
+
+            with sqlite3.connect("user.sqlite") as conn:  # Saves the new expense data to the database
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM users WHERE email = ?", (email,))
+                user_id = cur.fetchone()[0]
+
                 month = form_data.get("month", None)
 
-                existing_entry = db.execute("SELECT * FROM expenses WHERE user_id = ? AND month = ?",
-                                            (user_id, month)).fetchone()
+            with sqlite3.connect("user.sqlite") as conn:
+                cur = conn.cursor()
+
+                # Check if there's already an entry for the given month
+                cur.execute("SELECT * FROM expenses WHERE user_id = ? AND month = ?", (user_id, month))
+                existing_entry = cur.fetchone()
+
                 if existing_entry:
                     flash("Expenses for the selected month have already been submitted.")
-                    return redirect(url_for("form_page"))
+                    return redirect(url_for("form_page"))  # Add this line
                 else:
-                    db.execute("""
-                        INSERT INTO expenses (
-                            user_id,
-                            month,
-                            total_income,
-                            rent,
-                            utilities,
-                            groceries,
-                            gas,
-                            pets,
-                            other_needs,
-                            dining_out,
-                            vacation,
-                            tv_streaming,
-                            clothing_shoes_accessories
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (user_id, month, form_data["total_income"], form_data["rent"], form_data["utilities"],
-                              form_data["groceries"], form_data["gas"], form_data["pets"], form_data["other_needs"],
-                              form_data["dining_out"], form_data["vacation"], form_data["tv_streaming"],
-                              form_data["clothing_shoes_accessories"]))
-                    db.commit()
+                    # Save the new expense data
+                    cur.execute("""
+                    INSERT INTO expenses (
+                        user_id,
+                        month,
+                        total_income,
+                        rent,
+                        utilities,
+                        groceries,
+                        gas,
+                        pets,
+                        other_needs,
+                        dining_out,
+                        vacation,
+                        tv_streaming,
+                        clothing_shoes_accessories
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (user_id, month, form_data["total_income"], form_data["rent"], form_data["utilities"],
+                          form_data["groceries"], form_data["gas"], form_data["pets"], form_data["other_needs"],
+                          form_data["dining_out"], form_data["vacation"], form_data["tv_streaming"],
+                          form_data["clothing_shoes_accessories"]))
+                    conn.commit()
 
+                    # Update the form_data and redirect to the form page
                     session["form_data"] = form_data
                     return redirect(url_for("form_page"))
 
+        # If form_data is empty, set the month to the current month
         if not form_data:
             from datetime import datetime
             form_data["month"] = datetime.today().strftime("%Y-%m")
 
-        return render_template("Form.html", form_data=form_data, user_name=user_name)
+        return render_template("Form.html", form_data=form_data,
+                               user_name=user_name)  # Render the form template with the user's form data and name
 
     @app.route("/summary-page")  # Specifies url for summary page
     def summary_page():
@@ -589,38 +675,43 @@ class ExpenseApp(ExpenseTracker):
                 "SELECT MAX(rent), MAX(utilities), MAX(groceries), MAX(gas), MAX(pets), MAX(other_needs), MAX(dining_out), MAX(vacation), MAX(tv_streaming), MAX(clothing_shoes_accessories) FROM expenses WHERE user_id = ? AND month = ?",
                 (user_id, month))
             max_expense_row = db.fetchone()
-            max_expense_value = max(max_expense_row)
-            max_expense_category = labels[max_expense_row.index(max_expense_value)]
+            if max_expense_row and any(max_expense_row):
+                max_expense_value = max(max_expense_row)
+                max_expense_category = labels[max_expense_row.index(max_expense_value)]
+            else:
+                max_expense_value = 0
+                max_expense_category = "N/A"
 
             db.execute(
                 "SELECT MIN(rent), MIN(utilities), MIN(groceries), MIN(gas), MIN(pets), MIN(other_needs), MIN(dining_out), MIN(vacation), MIN(tv_streaming), MIN(clothing_shoes_accessories) FROM expenses WHERE user_id = ? AND month = ?",
                 (user_id, month))
             min_expense_row = db.fetchone()
-            min_expense_value = min(min_expense_row)
-            min_expense_category = labels[min_expense_row.index(min_expense_value)]
+            if min_expense_row is not None and any(min_expense_row):
+                min_expense_value = min(min_expense_row)
+                min_expense_category = labels[min_expense_row.index(min_expense_value)]
+            else:
+                min_expense_value = 0
+                min_expense_category = "N/A"
 
             # Create the summary graph
-            img_bytes = create_summary_graph(email, data, labels)
+            img_bytes = ExpenseTracker.create_summary_graph(email, data, labels)
             b64_img = base64.b64encode(img_bytes.read()).decode()
 
-            needs_percentage, wants_percentage, savings_and_investments_percentage = calculate_budget_percentages(
-                total_income, total_expenses, expenses_by_category)
+            needs_percentage, wants_percentage, savings_and_investments_percentage = ExpenseTracker.calculate_budget_percentages(total_income, total_expenses, expenses_by_category)
 
-            recommendation = generate_recommendations(total_income, total_expenses, difference, expenses_by_category)
+            recommendation = ExpenseTracker.generate_recommendations(total_income, total_expenses, difference, expenses_by_category)
 
             # Create the expense pie chart
-            b64_pie_chart = create_expense_pie_chart(email, month)
+            b64_pie_chart = ExpenseTracker.create_expense_pie_chart(email, month)
 
         return render_template("Summary.html", income=total_income, total_expenses=total_expenses,
                                difference=difference,
                                b64_img=b64_img, recommendation=recommendation, b64_pie_chart=b64_pie_chart,
                                max_expense_category=max_expense_category, min_expense_category=min_expense_category,
                                needs_percentage=needs_percentage, wants_percentage=wants_percentage,
-                               savings_and_investments_percentage=savings_and_investments_percentage,
-                               expense_categories_html=expense_categories_html)
+                               savings_and_investments_percentage=savings_and_investments_percentage,expense_categories_html=expense_categories_html)
 
-    @app.route("/report-creation",
-               methods=["GET", "POST"])  # Specifies url for report creation page and allows GET and POST methods
+    @app.route("/report-creation",methods=["GET", "POST"])  # Specifies url for report creation page and allows GET and POST methods
     def report_creation():
         if request.method == "POST":  # Check if the form is submitted using POST method
             email = session.get("email")  # Get the email from form data
@@ -632,7 +723,7 @@ class ExpenseApp(ExpenseTracker):
 
             # Generate the expense report and send it to the user's email in a seperate thread
             # multi threading -> concurrency
-            t = Thread(target=send_expense_report, args=(email, month, report_queue))
+            t = Thread(target=ExpenseTracker.send_expense_report, args=(email, month, report_queue))
             t.start()
             t.join()
 
@@ -735,10 +826,38 @@ class ExpenseApp(ExpenseTracker):
                     return {}  # Return an empty dictionary if no expenses are found
         return {}
 
+    @app.route('/stocks')
+    def stocks_page():
+        return render_template('stocks.html')
+
+    @app.route('/get-stock-data')
+    def get_stock_data():
+        symbol = request.args.get('symbol', default='AAPL')
+        api_key = '15D6EX4PLBTRPSEX'
+
+        url = 'https://www.alphavantage.co/query'
+        params = {
+            'function': 'GLOBAL_QUOTE',
+            'symbol': symbol,
+            'apikey': api_key
+        }
+
+        response = requests.get(url, params=params)
+        data = response.json()
+
+        if 'Global Quote' in data:
+            quote = data['Global Quote']
+            stock_data = {
+                'price': float(quote['05. price']),
+                'change': float(quote['09. change'])
+            }
+            return jsonify(stock_data=stock_data)
+
+        return jsonify(error='Error fetching stock data')
+
     @app.route("/Home")  # Specifies url for home page
     def home():
-        return render_template(
-            'Home.html')  # renders the "Home.html" template and returns it to the client's web browser
+        return render_template("Home.html")  # renders the "Home.html" template and returns it to the client's web browser
 
     def run(self):
         report_thread = threading.Thread(target=self.process_report_queue, args=(self.report_queue,))
